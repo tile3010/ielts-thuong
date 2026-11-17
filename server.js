@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readProgress, writeProgress } from './database.js';
 import { pushReady, subscribePush, unsubscribePush, testPush, sendDailyPush } from './push.js';
-import { multiUser, currentUser, authRequest, sessionCookies, userProgress, saveUserProgress, reserveAi, createLearner, listLearners, updateLearner, migrateOwner } from './accounts.js';
+import { multiUser, currentUser, admittedUser, authRequest, sessionCookies, userProgress, saveUserProgress, reserveAi, createLearner, listLearners, updateLearner, migrateOwner } from './accounts.js';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -105,7 +105,7 @@ export async function handler(req, res) {
   const authenticated=multiUser()?Boolean(user):Boolean(process.env.APP_PASSWORD&&token&&validSession(token));
   if(req.method==='POST'&&url.pathname==='/auth/login'){
     if(multiUser()){
-      try{const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Thử lại sau 15 phút.'});const body=await readJson(req);if(typeof body.email!=='string'||typeof body.password!=='string')return send(res,400,{error:'Nhập email và mật khẩu.'});const session=await authRequest('token?grant_type=password',{email:body.email.trim(),password:body.password});const verified=await currentUser({headers:{...req.headers,cookie:'ielts_access='+session.access_token},socket:req.socket},res);if(!verified)throw Error('Account not admitted');sessionCookies(req,res,session);loginAttempts.delete(address);return send(res,200,{ok:true})}catch{const address=req.socket.remoteAddress||'local',old=loginAttempts.get(address);loginAttempts.set(address,{count:old?.until>Date.now()?old.count+1:1,until:old?.until>Date.now()?old.until:Date.now()+900000});return send(res,401,{error:'Không đăng nhập được. Kiểm tra email, mật khẩu hoặc cấu hình Supabase Auth.'})}
+      try{const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Thử lại sau 15 phút.'});const body=await readJson(req);if(typeof body.email!=='string'||typeof body.password!=='string')return send(res,400,{error:'Nhập email và mật khẩu.'});const session=await authRequest('token?grant_type=password',{email:body.email.trim(),password:body.password});const verified=await admittedUser(session.user);if(!verified)throw Error('Account not admitted');sessionCookies(req,res,session);loginAttempts.delete(address);return send(res,200,{ok:true})}catch{const address=req.socket.remoteAddress||'local',old=loginAttempts.get(address);loginAttempts.set(address,{count:old?.until>Date.now()?old.count+1:1,until:old?.until>Date.now()?old.until:Date.now()+900000});return send(res,401,{error:'Không đăng nhập được. Kiểm tra email, mật khẩu hoặc cấu hình Supabase Auth.'})}
     }
     const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);
     if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.'});

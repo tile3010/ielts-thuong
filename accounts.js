@@ -15,7 +15,11 @@ export async function currentUser(req,res){
  const cookies=Object.fromEntries((req.headers.cookie||'').split(';').map(s=>s.trim().split(/=(.*)/s).slice(0,2)).filter(a=>a.length===2));let user;
  if(cookies.ielts_access){try{user=await authRequest('user',null,cookies.ielts_access)}catch(error){if(error.status!==401&&error.status!==403)throw error}}
  if(!user&&cookies.ielts_refresh){try{const session=await authRequest('token?grant_type=refresh_token',{refresh_token:cookies.ielts_refresh});user=session.user;sessionCookies(req,res,session)}catch(error){if(error.status!==400&&error.status!==401&&error.status!==403)throw error}}
- if(!user)return null;
+ return admittedUser(user);
+}
+// Call only with a user returned by the trusted Supabase Auth API.
+export async function admittedUser(user){
+ if(!user?.id)return null;
  if(!process.env.OWNER_EMAIL)throw new Error('Chưa cấu hình OWNER_EMAIL.');
  const db=await pushDatabase();if(isOwner(user))await db.query('insert into public.ielts_members(user_id,display_name) values($1,$2) on conflict(user_id) do nothing',[user.id,'Thương']);
  const member=(await db.query('select display_name,active,daily_ai_limit from public.ielts_members where user_id=$1',[user.id])).rows[0];if(!member?.active)return null;

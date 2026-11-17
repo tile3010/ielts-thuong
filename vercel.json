@@ -9,16 +9,22 @@
       "includeFiles": "{index.html,login.html,css/**,js/**,supabase-ca.crt,manifest.webmanifest,sw.js,icons/**}"
     }
   },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index"
-    }
-  ],
   "crons": [
     {
       "path": "/api/cron/remind",
       "schedule": "0 13 * * *"
+    }
+  ],
+  "regions": [
+    "syd1"
+  ],
+  "routes": [
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index"
     }
   ]
 }
