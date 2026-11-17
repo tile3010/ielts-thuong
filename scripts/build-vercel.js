@@ -1,4 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-// Serve private app assets through the authenticated handler.
+import { mkdirSync, writeFileSync, copyFileSync, cpSync } from 'node:fs';
+// Serve every page through the authenticated handler, not as public static files.
 mkdirSync('public', { recursive: true });
+// Vercel requires a non-empty output directory. No private app assets go here.
 writeFileSync('public/robots.txt', 'User-agent: *\nDisallow: /\n');
+copyFileSync('manifest.webmanifest', 'public/manifest.webmanifest');
+copyFileSync('sw.js', 'public/sw.js');
+cpSync('icons', 'public/icons', { recursive: true });
