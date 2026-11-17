@@ -6,16 +6,10 @@
     {id:'speaking',name:'Speaking',vi:'Nói',icon:'🗣️',accent:'#f2e8f4',blurb:'Nói tự tin bằng câu đơn giản, đủ ý.'}
   ];
   const START='2026-11-17';
-  const key='thuong-ielts-study-v1';
+  const key='thuong-ielts-study-v1'+(window.LEARNER?'-'+window.LEARNER.id:'');
   const defaults={name:'Thương',currentBand:'3.5',targetBand:'5.5',minutes:60,sessions:[],drafts:{},checks:{}};
+  if(window.LEARNER)defaults.name=window.LEARNER.name;
   let data={...defaults,...JSON.parse(localStorage.getItem(key)||'{}')};
-  const requestedReset='thuong-reset-sessions-20261117-1';
-  if(!localStorage.getItem(requestedReset)){
-    localStorage.setItem(key+'-before-session-reset',JSON.stringify(data));
-    data.sessions=[];data.drafts={};data.checks={};data.listeningPlays={};
-    localStorage.setItem(key,JSON.stringify(data));
-    localStorage.setItem(requestedReset,'done');
-  }
   data.aiReports=Array.isArray(data.aiReports)?data.aiReports:[];
   data.monthlyTests=data.monthlyTests||{};
   let page='home',toastTimer;

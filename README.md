@@ -32,3 +32,7 @@ GitHub Pages cannot run this Node server. For an online version, use a Node host
 ## Checks
 
 Run `node --check server.js` and `node --check js/app.js` for syntax checks. Real microphone, playback and paid API requests require browser/account validation.
+
+## Separate learner accounts
+
+See MULTIUSER-SETUP.md. Multi-user mode is opt-in and requires Supabase Auth configuration and a database migration. The legacy password mode remains the default until setup is completed.

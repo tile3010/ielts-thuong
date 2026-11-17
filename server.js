@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readProgress, writeProgress } from './database.js';
 import { pushReady, subscribePush, unsubscribePush, testPush, sendDailyPush } from './push.js';
+import { multiUser, currentUser, authRequest, sessionCookies, userProgress, saveUserProgress, reserveAi, createLearner, listLearners, updateLearner, migrateOwner } from './accounts.js';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -99,8 +100,13 @@ export async function handler(req, res) {
   if(req.method==='GET'&&publicAssets[url.pathname]){return readFile(join(root,url.pathname.slice(1)),(error,content)=>error?send(res,404,'Not found.','text/plain'):send(res,200,content,publicAssets[url.pathname]));}
   const password=process.env.APP_PASSWORD;
   const token=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('ielts_session='))?.slice(14);
-  const authenticated=Boolean(process.env.APP_PASSWORD&&token&&validSession(token));
+  let user=null;
+  if(multiUser()&&!['/auth/login','/auth/logout'].includes(url.pathname)){try{user=await currentUser(req,res)}catch{return send(res,503,{error:'Chưa kết nối được Supabase Auth hoặc bảng tài khoản. Kiểm tra cấu hình và migration multiuser.sql.'})}}
+  const authenticated=multiUser()?Boolean(user):Boolean(process.env.APP_PASSWORD&&token&&validSession(token));
   if(req.method==='POST'&&url.pathname==='/auth/login'){
+    if(multiUser()){
+      try{const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Thử lại sau 15 phút.'});const body=await readJson(req);if(typeof body.email!=='string'||typeof body.password!=='string')return send(res,400,{error:'Nhập email và mật khẩu.'});const session=await authRequest('token?grant_type=password',{email:body.email.trim(),password:body.password});const verified=await currentUser({headers:{...req.headers,cookie:'ielts_access='+session.access_token},socket:req.socket},res);if(!verified)throw Error('Account not admitted');sessionCookies(req,res,session);loginAttempts.delete(address);return send(res,200,{ok:true})}catch{const address=req.socket.remoteAddress||'local',old=loginAttempts.get(address);loginAttempts.set(address,{count:old?.until>Date.now()?old.count+1:1,until:old?.until>Date.now()?old.until:Date.now()+900000});return send(res,401,{error:'Không đăng nhập được. Kiểm tra email, mật khẩu hoặc cấu hình Supabase Auth.'})}
+    }
     const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);
     if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.'});
     if(!password)return send(res,503,{error:'Chủ trang cần đặt APP_PASSWORD trong .env rồi khởi động lại server.'});
@@ -109,12 +115,21 @@ export async function handler(req, res) {
       res.setHeader('Set-Cookie','ielts_session='+session+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400'+((process.env.VERCEL||req.socket.encrypted)?'; Secure':''));return send(res,200,{ok:true});
     }catch{return send(res,400,{error:'Không thể đăng nhập. Vui lòng thử lại.'})}
   }
+  if(req.method==='POST'&&url.pathname==='/auth/logout'&&multiUser()){const access=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('ielts_access='))?.slice(13);if(access)try{await authRequest('logout',{},access)}catch{}res.setHeader('Set-Cookie',['ielts_access=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0','ielts_refresh=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0','ielts_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0']);return send(res,200,{ok:true})}
   if(req.method==='POST'&&url.pathname==='/auth/logout'){res.setHeader('Set-Cookie','ielts_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true})}
-  if(!authenticated){if(url.pathname.startsWith('/api/'))return send(res,401,{error:'Vui lòng đăng nhập để tiếp tục.'});if(req.method==='GET')return send(res,200,loginPage(),'text/html; charset=utf-8');return send(res,401,{error:'Vui lòng đăng nhập.'})}
-  if(req.method==='GET'&&url.pathname==='/api/push/config')return send(res,200,{ready:pushReady(),publicKey:process.env.VAPID_PUBLIC_KEY||''});
+  if(user&&url.pathname.startsWith('/api/admin/')){
+    if(!user.owner)return send(res,403,{error:'Chỉ chủ trang được quản lý tài khoản.'});
+    try{if(req.method==='GET'&&url.pathname==='/api/admin/accounts')return send(res,200,{accounts:await listLearners()});if(req.method==='POST'&&url.pathname==='/api/admin/accounts')return send(res,200,await createLearner(await readJson(req)));if(req.method==='POST'&&url.pathname==='/api/admin/account-access'){await updateLearner(user,await readJson(req));return send(res,200,{ok:true})}if(req.method==='POST'&&url.pathname==='/api/admin/migrate')return send(res,200,{migrated:await migrateOwner(user)});return send(res,404,{error:'Not found'})}catch{return send(res,400,{error:'Không thực hiện được. Kiểm tra email, mật khẩu đủ 12 ký tự, key quản trị và bảng dữ liệu.'})}
+  }
+  if(user&&req.method==='POST'&&['/api/speaking','/api/assessment','/api/monthly-test','/api/monthly-assessment'].includes(url.pathname)){try{if(!await reserveAi(user))return send(res,429,{error:'Đã hết lượt AI trong ngày. Liên hệ chủ trang để điều chỉnh.'})}catch{return send(res,503,{error:'Không kiểm tra được hạn mức AI.'})}}
+  if(user&&url.pathname==='/api/progress'&&['GET','POST'].includes(req.method)){
+    try{if(req.method==='GET')return send(res,200,{record:await userProgress(user.id)});const body=await readJson(req),revision=Number(body.revision);if(!body.state||!Array.isArray(body.state.sessions)||!Number.isInteger(revision)||revision<0)return send(res,400,{error:'Dữ liệu không hợp lệ.'});const result=await saveUserProgress(user.id,body.state,revision);return result?send(res,200,{revision:result.revision,updatedAt:result.updated_at}):send(res,409,{error:'Cloud đã thay đổi. Tải bản cloud trước khi lưu.'})}catch{return send(res,503,{error:'Không đồng bộ được dữ liệu tài khoản.'})}
+  }
+  if(!authenticated){if(url.pathname.startsWith('/api/'))return send(res,401,{error:'Vui lòng đăng nhập để tiếp tục.'});if(req.method==='GET')return send(res,200,multiUser()?readFileSync(join(root,'login.html'),'utf8'):loginPage(),'text/html; charset=utf-8');return send(res,401,{error:'Vui lòng đăng nhập.'})}
+  if(req.method==='GET'&&url.pathname==='/api/push/config')return send(res,200,{ready:pushReady(),publicKey:process.env.VAPID_PUBLIC_KEY||'',userId:user?.id||null});
   if(req.method==='POST'&&['/api/push/subscribe','/api/push/unsubscribe','/api/push/test'].includes(url.pathname)){
     if(!pushReady())return send(res,503,{error:'Chưa cấu hình VAPID trên Vercel.'});
-    try{const body=await readJson(req);if(url.pathname.endsWith('/unsubscribe'))await unsubscribePush(body);else if(url.pathname.endsWith('/test'))await testPush(body);else await subscribePush(body);return send(res,200,{ok:true})}catch{return send(res,400,{error:'Không xử lý được thông báo. Kiểm tra kết nối Supabase, cấu hình VAPID và quyền thông báo.'})}
+    try{const body=await readJson(req);if(url.pathname.endsWith('/unsubscribe'))await unsubscribePush(body,user?.id);else if(url.pathname.endsWith('/test'))await testPush(body,user?.id);else await subscribePush(body,user?.id);return send(res,200,{ok:true})}catch{return send(res,400,{error:'Không xử lý được thông báo. Kiểm tra kết nối Supabase, cấu hình VAPID và quyền thông báo.'})}
   }
   if(url.pathname==='/api/progress'&&['GET','POST'].includes(req.method)){
     try{
@@ -217,6 +232,7 @@ export async function handler(req, res) {
   readFile(file, (error, content) => {
     if (error) return send(res, 404, 'Not found.', 'text/plain; charset=utf-8');
     const type = ({ '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8' })[extname(file)] || 'application/octet-stream';
+    if(user&&extname(file)==='.html'){const identity=JSON.stringify({id:user.id,name:user.member.display_name,owner:user.owner}).replaceAll('<','\\u003c');content=content.toString('utf8').replace('<head>','<head><script>window.LEARNER='+identity+';</script>');}
     return send(res, 200, content, type);
   });
 }

@@ -6,7 +6,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "includeFiles": "{index.html,css/**,js/**,supabase-ca.crt,manifest.webmanifest,sw.js,icons/**}"
+      "includeFiles": "{index.html,login.html,css/**,js/**,supabase-ca.crt,manifest.webmanifest,sw.js,icons/**}"
     }
   },
   "rewrites": [
