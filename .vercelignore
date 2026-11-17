@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.git
+.openai
+dist
+node_modules
+.update-project.cjs
+*.zip
+*.log

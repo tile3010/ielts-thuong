@@ -9,6 +9,13 @@
   const key='thuong-ielts-study-v1';
   const defaults={name:'Thương',currentBand:'3.5',targetBand:'5.5',minutes:60,sessions:[],drafts:{},checks:{}};
   let data={...defaults,...JSON.parse(localStorage.getItem(key)||'{}')};
+  const requestedReset='thuong-reset-sessions-20261117-1';
+  if(!localStorage.getItem(requestedReset)){
+    localStorage.setItem(key+'-before-session-reset',JSON.stringify(data));
+    data.sessions=[];data.drafts={};data.checks={};data.listeningPlays={};
+    localStorage.setItem(key,JSON.stringify(data));
+    localStorage.setItem(requestedReset,'done');
+  }
   data.aiReports=Array.isArray(data.aiReports)?data.aiReports:[];
   data.monthlyTests=data.monthlyTests||{};
   let page='home',toastTimer;
@@ -271,5 +278,15 @@
   };
   const bindBeforeLogout=bindPage;
   bindPage=function(){bindBeforeLogout();if(document.getElementById('logout-button'))return;const target=document.querySelector('.sidebar')||app;const button=document.createElement('button');button.id='logout-button';button.className='btn btn-line btn-small';button.textContent='Đăng xuất';button.onclick=async()=>{if(recorder?.state==='recording'){showToast('Dừng ghi âm trước khi đăng xuất.');return}try{const response=await fetch('/auth/logout',{method:'POST'});if(!response.ok)throw new Error();location.replace('/')}catch{showToast('Chưa đăng xuất được. Hãy thử lại.')}};target.append(button)};
+  const homeBeforeCloud=home;
+  home=function(){return '<section class="panel progress-card" style="margin-bottom:20px"><h3>Tiến độ học trên Supabase</h3><p>Lưu để tiếp tục học trên thiết bị khác. Trên thiết bị mới, tải dữ liệu cloud trước khi học.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-green btn-small" id="cloud-save">Lưu lên cloud</button><button class="btn btn-line btn-small" id="cloud-load">Tải từ cloud</button></div><p id="cloud-status" role="status" class="footnote">Chưa kiểm tra kết nối.</p></section>'+homeBeforeCloud()};
+  const bindBeforeCloud=bindPage;
+  bindPage=function(){bindBeforeCloud();const upload=document.getElementById('cloud-save'),download=document.getElementById('cloud-load'),status=document.getElementById('cloud-status');if(!upload)return;
+    const cloudKey=key+'-cloud-revision';let busy=false;
+    const run=async action=>{if(busy)return;busy=true;upload.disabled=download.disabled=true;try{await action()}catch(error){status.textContent=error.message}finally{busy=false;upload.disabled=download.disabled=false}};
+    download.onclick=()=>run(async()=>{const response=await fetch('/api/progress'),result=await response.json();if(!response.ok)throw new Error(result.error);if(!result.record){localStorage.setItem(cloudKey,'0');status.textContent='Cloud chưa có dữ liệu. Bạn có thể lưu dữ liệu trên máy này lên cloud.';return}if(!confirm('Thay dữ liệu học trên trình duyệt này bằng bản trên cloud? Bản hiện tại sẽ được sao lưu trên máy.'))return;localStorage.setItem(key+'-backup',JSON.stringify(data));localStorage.setItem(key,JSON.stringify(result.record.state));localStorage.setItem(cloudKey,String(result.record.revision));location.reload()});
+    upload.onclick=()=>run(async()=>{let revision=localStorage.getItem(cloudKey);if(revision===null){const response=await fetch('/api/progress'),result=await response.json();if(!response.ok)throw new Error(result.error);if(result.record)throw new Error('Cloud đã có dữ liệu. Hãy tải từ cloud trước để tránh ghi đè tiến độ.');revision='0'}const result=await postAI('/api/progress',{state:data,revision:Number(revision)});localStorage.setItem(cloudKey,String(result.revision));status.textContent='Đã lưu lên Supabase lúc '+new Date(result.updatedAt).toLocaleString('vi-VN')});
+    fetch('/api/progress').then(async response=>{const result=await response.json();if(!response.ok)throw new Error(result.error);status.textContent=result.record?'Cloud có bản lưu ngày '+new Date(result.record.updated_at).toLocaleString('vi-VN'):'Đã kết nối Supabase. Chưa có bản lưu.'}).catch(error=>status.textContent=error.message);
+  };
   render();
 })();

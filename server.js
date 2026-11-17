@@ -2,7 +2,8 @@ import { createServer } from 'node:http';
 import { readFile, readFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { readProgress, writeProgress } from './database.js';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -26,7 +27,8 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 }
 
 async function readJson(req) {
-  let raw = '';
+  if(req.body && typeof req.body==='object' && !Buffer.isBuffer(req.body))return req.body;
+  let raw = typeof req.body==='string'?req.body:'';
   for await (const chunk of req) {
     raw += chunk;
     if (Buffer.byteLength(raw) > 100_000) throw Object.assign(new Error('Request is too large.'), { status: 413 });
@@ -73,29 +75,63 @@ const monthlyReviewPrompt = `Bạn là gia sư IELTS cá nhân. Đánh giá bài
 
 const newsTopics={seo:'SEO Google search',digital:'digital marketing',marketing:'marketing strategy',agents:'AI agents',ai:'artificial intelligence',finance:'personal finance',motivation:'personal development habits'};
 const newsCache=new Map();
-const loginSessions=new Map(),loginAttempts=new Map();
+const loginAttempts=new Map();
+function sessionSignature(value){return createHmac('sha256',process.env.SESSION_SECRET||passwordDigest(process.env.APP_PASSWORD||'')).update(value).digest('hex')}
+function validSession(token){try{const [expiry,nonce,signature]=token.split('.');if(!expiry||!nonce||!signature||Number(expiry)<=Date.now())return false;const expected=sessionSignature(expiry+'.'+nonce);return signature.length===expected.length&&timingSafeEqual(Buffer.from(signature),Buffer.from(expected))}catch{return false}}
+function newSession(){const value=String(Date.now()+86400000)+'.'+randomBytes(24).toString('hex');return value+'.'+sessionSignature(value)}
+
 const passwordDigest=value=>createHash('sha256').update(value).digest();
 const loginPage=()=>`<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Đăng nhập · Thương IELTS</title><style>body{margin:0;background:#f2f7f4;font:16px system-ui;color:#173e33;min-height:100vh;display:grid;place-items:center}main{background:white;border:1px solid #dbe6df;border-radius:24px;padding:36px;max-width:360px;width:calc(100% - 100px);box-shadow:0 12px 40px #174d3310}h1{font-size:26px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:13px;border-radius:10px;margin-top:12px}input{border:1px solid #b8ccc1}button{border:0;background:#166b58;color:white;cursor:pointer}p{line-height:1.6}#error{color:#a02a2a}</style><main><p>THƯƠNG IELTS</p><h1>Không gian học của bạn</h1><p>Nhập mật khẩu để tiếp tục học.</p><form id="login"><label for="password">Mật khẩu</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus maxlength="256"><button>Đăng nhập</button><p id="error" role="alert"></p></form></main><script>document.getElementById('login').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{const r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('password').value})});const j=await r.json();if(!r.ok)throw Error(j.error);location.replace('/')}catch(e){document.getElementById('error').textContent=e.message}finally{b.disabled=false}}</script></html>`;
 const xmlText=value=>String(value||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-const server = createServer(async (req, res) => {
+export async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','same-origin');
   if(req.method==='POST'&&req.headers.origin){try{if(new URL(req.headers.origin).host!==req.headers.host)return send(res,403,{error:'Invalid origin.'})}catch{return send(res,403,{error:'Invalid origin.'})}}
   const password=process.env.APP_PASSWORD;
   const token=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('ielts_session='))?.slice(14);
-  const authenticated=Boolean(token&&loginSessions.get(token)>Date.now());
+  const authenticated=Boolean(process.env.APP_PASSWORD&&token&&validSession(token));
   if(req.method==='POST'&&url.pathname==='/auth/login'){
     const address=req.socket.remoteAddress||'local',attempt=loginAttempts.get(address);
     if(attempt?.until>Date.now()&&attempt.count>=5)return send(res,429,{error:'Nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.'});
     if(!password)return send(res,503,{error:'Chủ trang cần đặt APP_PASSWORD trong .env rồi khởi động lại server.'});
     try{const body=await readJson(req);if(typeof body.password!=='string'||!timingSafeEqual(passwordDigest(body.password),passwordDigest(password))){const state=attempt?.until>Date.now()?attempt:{count:0,until:Date.now()+900000};state.count++;loginAttempts.set(address,state);return send(res,401,{error:'Mật khẩu không đúng.'})}
-      loginAttempts.delete(address);const session=randomBytes(32).toString('hex');const expiry=Date.now()+86400000;for(const [key,value]of loginSessions)if(value<Date.now())loginSessions.delete(key);loginSessions.set(session,expiry);
-      res.setHeader('Set-Cookie','ielts_session='+session+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400'+(req.socket.encrypted?'; Secure':''));return send(res,200,{ok:true});
+      loginAttempts.delete(address);const session=newSession();
+      res.setHeader('Set-Cookie','ielts_session='+session+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400'+((process.env.VERCEL||req.socket.encrypted)?'; Secure':''));return send(res,200,{ok:true});
     }catch{return send(res,400,{error:'Không thể đăng nhập. Vui lòng thử lại.'})}
   }
-  if(req.method==='POST'&&url.pathname==='/auth/logout'){if(token)loginSessions.delete(token);res.setHeader('Set-Cookie','ielts_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true})}
+  if(req.method==='POST'&&url.pathname==='/auth/logout'){res.setHeader('Set-Cookie','ielts_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true})}
   if(!authenticated){if(url.pathname.startsWith('/api/'))return send(res,401,{error:'Vui lòng đăng nhập để tiếp tục.'});if(req.method==='GET')return send(res,200,loginPage(),'text/html; charset=utf-8');return send(res,401,{error:'Vui lòng đăng nhập.'})}
+  if(url.pathname==='/api/progress'&&['GET','POST'].includes(req.method)){
+    try{
+      if(process.env.PGHOST){try{
+        if(req.method==='GET')return send(res,200,{record:await readProgress()});
+        const body=await readJson(req),revision=Number(body.revision);
+        if(!body.state||!Array.isArray(body.state.sessions)||!Number.isInteger(revision)||revision<0)return send(res,400,{error:'Dữ liệu không hợp lệ.'});
+        const record=await writeProgress(body.state,revision);if(!record)return send(res,409,{error:'Cloud đã thay đổi. Tải dữ liệu cloud trước khi lưu.'});
+        return send(res,200,{revision:record.revision,updatedAt:record.updated_at});
+      }catch(error){const missing=['ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND'].includes(error.code);return send(res,503,{error:missing?'Chưa cài thư viện PostgreSQL. Trong thư mục ielts-personal, chạy npm.cmd install pg rồi khởi động lại server.':'Kết nối PostgreSQL thất bại. Mã: '+String(error.code||'CONNECTION_FAILED')+'. Kiểm tra host, user, mật khẩu database và SSL.'})}}
+      const base=process.env.SUPABASE_URL?.replace(/\/+$/,''),secret=process.env.SUPABASE_SECRET_KEY;
+      if(!base||!secret)return send(res,503,{error:'Chưa có SUPABASE_URL hoặc SUPABASE_SECRET_KEY trong .env.'});
+      const endpoint=base+'/rest/v1/ielts_progress';
+      const headers={apikey:secret,'Content-Type':'application/json','User-Agent':'ThuongIELTS-Server/1.0'};
+      if(secret.startsWith('eyJ'))headers.Authorization='Bearer '+secret;
+      if(req.method==='GET'){
+        const response=await fetch(endpoint+'?id=eq.thuong&select=state,revision,updated_at',{headers,signal:AbortSignal.timeout(15000)});
+        if(!response.ok){const problem=await response.json().catch(()=>({}));const code=String(problem.code||'');const advice=response.status===401?'Key Supabase không hợp lệ. Dùng Secret key hoặc service_role, rồi khởi động lại server.':response.status===403?'Key không có quyền đọc bảng. Dùng Secret key phía server và kiểm tra GRANT trong setup.sql.':code==='PGRST205'||response.status===404?'Chưa tìm thấy bảng public.ielts_progress. Chạy setup.sql trong đúng project Supabase.':'Kiểm tra Data API và quyền truy cập bảng public.ielts_progress.';throw new Error('Supabase HTTP '+response.status+(code?' ('+code+')':'')+': '+advice);}
+        const rows=await response.json();return send(res,200,{record:rows[0]||null});
+      }
+      const body=await readJson(req);
+      if(!body.state||typeof body.state!=='object'||!Array.isArray(body.state.sessions))return send(res,400,{error:'Dữ liệu học không hợp lệ.'});
+      const revision=Number(body.revision);
+      if(!Number.isInteger(revision)||revision<0)return send(res,400,{error:'Phiên bản dữ liệu không hợp lệ.'});
+      const response=await fetch(revision?endpoint+'?id=eq.thuong&revision=eq.'+revision:endpoint,{method:revision?'PATCH':'POST',headers:{...headers,Prefer:'return=representation'},body:JSON.stringify({id:'thuong',state:body.state,revision:revision+1,updated_at:new Date().toISOString()}),signal:AbortSignal.timeout(15000)});
+      if(response.status===409)return send(res,409,{error:'Dữ liệu trên cloud đã thay đổi. Tải lại dữ liệu cloud trước khi lưu.'});
+      if(!response.ok)throw new Error('Không lưu được. Kiểm tra key, bảng dữ liệu và kết nối Supabase.');
+      const rows=await response.json();if(!rows.length)return send(res,409,{error:'Thiết bị khác đã cập nhật dữ liệu. Tải dữ liệu cloud trước khi lưu lại.'});
+      return send(res,200,{revision:rows[0].revision,updatedAt:rows[0].updated_at});
+    }catch(error){return send(res,503,{error:error.message})}
+  }
   if(req.method==='GET'&&url.pathname==='/api/news'){
     const topic=url.searchParams.get('topic')||'seo';if(!newsTopics[topic])return send(res,400,{error:'Unknown topic'});
     const cached=newsCache.get(topic);if(cached&&Date.now()-cached.time<1800000)return send(res,200,cached.result);
@@ -105,7 +141,7 @@ const server = createServer(async (req, res) => {
     try {
       if (!process.env.OPENAI_API_KEY) throw new Error('Chưa cấu hình OPENAI_API_KEY trong .env.');
       const chunks=[];let size=0;
-      for await (const chunk of req) { size+=chunk.length;if(size>20_000_000)throw new Error('Bản thu quá lớn. Hãy thu tối đa 3 phút.');chunks.push(chunk); }
+      for await (const chunk of (Buffer.isBuffer(req.body)?[req.body]:req)) { size+=chunk.length;if(size>20_000_000)throw new Error('Bản thu quá lớn. Hãy thu tối đa 3 phút.');chunks.push(chunk); }
       if(size<100)throw new Error('Bản thu trống. Hãy ghi âm lại.');
       const mime=(req.headers['content-type']||'audio/webm').split(';')[0];
       const extension=mime.includes('mp4')?'mp4':mime.includes('ogg')?'ogg':'webm';
@@ -169,6 +205,6 @@ const server = createServer(async (req, res) => {
     const type = ({ '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8' })[extname(file)] || 'application/octet-stream';
     return send(res, 200, content, type);
   });
-});
+}
 
-server.listen(port, process.env.HOST || '127.0.0.1', () => console.log(`IELTS Study server: http://127.0.0.1:${port}`));
+if(!process.env.VERCEL){createServer(handler).listen(port,process.env.HOST||'127.0.0.1',()=>console.log('IELTS Study server: http://127.0.0.1:'+port));}
