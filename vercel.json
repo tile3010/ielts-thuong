@@ -9,5 +9,16 @@
       "includeFiles": "{index.html,css/**,js/**,supabase-ca.crt,manifest.webmanifest,sw.js,icons/**}"
     }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/remind",
+      "schedule": "0 13 * * *"
+    }
+  ]
 }

@@ -4,6 +4,7 @@ import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readProgress, writeProgress } from './database.js';
+import { pushReady, subscribePush, unsubscribePush, testPush, sendDailyPush } from './push.js';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -85,6 +86,12 @@ const loginPage=()=>`<!doctype html><html lang="vi"><meta charset="utf-8"><meta 
 const xmlText=value=>String(value||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');
 export async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
+  if(req.method==='GET'&&url.pathname==='/api/cron/remind'){
+    const expected=process.env.CRON_SECRET,provided=req.headers.authorization||'';
+    if(!expected||!timingSafeEqual(passwordDigest(provided),passwordDigest('Bearer '+expected)))return send(res,401,{error:'Unauthorized'});
+    if(!pushReady())return send(res,503,{error:'Push configuration missing'});
+    try{return send(res,200,await sendDailyPush())}catch{return send(res,503,{error:'Push delivery failed'})}
+  }
   res.setHeader('X-Frame-Options','DENY');
   res.setHeader('Referrer-Policy','same-origin');
   if(req.method==='POST'&&req.headers.origin){try{if(new URL(req.headers.origin).host!==req.headers.host)return send(res,403,{error:'Invalid origin.'})}catch{return send(res,403,{error:'Invalid origin.'})}}
@@ -104,6 +111,11 @@ export async function handler(req, res) {
   }
   if(req.method==='POST'&&url.pathname==='/auth/logout'){res.setHeader('Set-Cookie','ielts_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true})}
   if(!authenticated){if(url.pathname.startsWith('/api/'))return send(res,401,{error:'Vui lòng đăng nhập để tiếp tục.'});if(req.method==='GET')return send(res,200,loginPage(),'text/html; charset=utf-8');return send(res,401,{error:'Vui lòng đăng nhập.'})}
+  if(req.method==='GET'&&url.pathname==='/api/push/config')return send(res,200,{ready:pushReady(),publicKey:process.env.VAPID_PUBLIC_KEY||''});
+  if(req.method==='POST'&&['/api/push/subscribe','/api/push/unsubscribe','/api/push/test'].includes(url.pathname)){
+    if(!pushReady())return send(res,503,{error:'Chưa cấu hình VAPID trên Vercel.'});
+    try{const body=await readJson(req);if(url.pathname.endsWith('/unsubscribe'))await unsubscribePush(body);else if(url.pathname.endsWith('/test'))await testPush(body);else await subscribePush(body);return send(res,200,{ok:true})}catch{return send(res,400,{error:'Không xử lý được thông báo. Kiểm tra kết nối Supabase, cấu hình VAPID và quyền thông báo.'})}
+  }
   if(url.pathname==='/api/progress'&&['GET','POST'].includes(req.method)){
     try{
       if(process.env.PGHOST){try{

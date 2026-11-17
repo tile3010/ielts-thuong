@@ -9,3 +9,4 @@ dist/
 *.zip
 public/
 .vercel/
+.npm-cache/

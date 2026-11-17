@@ -8,3 +8,4 @@ node_modules
 .update-project.cjs
 *.zip
 *.log
+.npm-cache
