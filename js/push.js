@@ -4,6 +4,8 @@ function mountPush(){
   if(!appRoot||document.getElementById('push-panel'))return;
   const panel=document.createElement('section');panel.id='push-panel';panel.className='panel progress-card';panel.style.marginBottom='20px';
   panel.innerHTML='<h3>Nhắc học trên điện thoại</h3><p>Nhận thông báo từ Thương IELTS vào buổi tối, kể cả khi đã đóng trang. Bấm thông báo để mở bài học.</p><p><b>“Đi học tiếng Anh đi, mày muốn dốt tiếng Anh hoài vậy Thương!”</b></p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-green btn-small" id="push-enable">Bật thông báo 20:00</button><button class="btn btn-line btn-small" id="push-test" disabled>Gửi thử</button><button class="btn btn-line btn-small" id="push-disable" disabled>Tắt trên thiết bị này</button></div><p id="push-status" role="status" class="footnote">Đang kiểm tra…</p><p class="footnote">Lịch theo giờ Việt Nam. Vercel Hobby có thể gửi trong khoảng 20:00–20:59; thời điểm điện thoại hiển thị còn phụ thuộc mạng và cài đặt hệ thống.</p>';
+  const learnerName=String(window.LEARNER?.name||'Thương').trim()||'bạn';
+  panel.querySelector('p b').textContent='“Đi học tiếng Anh đi, mày muốn dốt tiếng Anh hoài vậy '+learnerName+'!”';
   appRoot.prepend(panel);
   const enable=panel.querySelector('#push-enable'),test=panel.querySelector('#push-test'),disable=panel.querySelector('#push-disable'),status=panel.querySelector('#push-status');
   let registration,config,subscription,busy=false;
