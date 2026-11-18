@@ -6,6 +6,7 @@ import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypt
 import { readProgress, writeProgress } from './database.js';
 import { pushReady, subscribePush, unsubscribePush, testPush, sendDailyPush } from './push.js';
 import { multiUser, currentUser, admittedUser, authRequest, sessionCookies, userProgress, saveUserProgress, reserveAi, createLearner, listLearners, updateLearner, migrateOwner } from './accounts.js';
+import { learningTarget, validatePlan, curriculumPrompt } from './curriculum.js';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 
@@ -33,7 +34,7 @@ async function readJson(req) {
   let raw = typeof req.body==='string'?req.body:'';
   for await (const chunk of req) {
     raw += chunk;
-    if (Buffer.byteLength(raw) > 100_000) throw Object.assign(new Error('Request is too large.'), { status: 413 });
+    if (Buffer.byteLength(raw) > 1_000_000) throw Object.assign(new Error('Request is too large.'), { status: 413 });
   }
   try { return JSON.parse(raw || '{}'); }
   catch { throw Object.assign(new Error('Invalid JSON request.'), { status: 400 }); }
@@ -127,6 +128,14 @@ export async function handler(req, res) {
   }
   if(!authenticated){if(url.pathname.startsWith('/api/'))return send(res,401,{error:'Vui lòng đăng nhập để tiếp tục.'});if(req.method==='GET')return send(res,200,multiUser()?readFileSync(join(root,'login.html'),'utf8'):loginPage(),'text/html; charset=utf-8');return send(res,401,{error:'Vui lòng đăng nhập.'})}
   if(req.method==='GET'&&url.pathname==='/api/push/config')return send(res,200,{ready:pushReady(),publicKey:process.env.VAPID_PUBLIC_KEY||'',userId:user?.id||null});
+  if(req.method==='POST'&&['/api/curriculum','/api/homework-review'].includes(url.pathname)){
+    try{
+      if(user&&!await reserveAi(user))return send(res,429,{error:'Đã hết lượt AI hôm nay.'});
+      const body=await readJson(req);if(!['listening','reading','writing','speaking'].includes(body.skill))return send(res,400,{error:'Kỹ năng không hợp lệ.'});
+      if(url.pathname==='/api/curriculum'){const target=learningTarget(body.monthlyTests,body.skill);const plan=validatePlan(await requestModel(curriculumPrompt,{skill:body.skill,target,topic:body.topic||'Learning and work',recentErrors:body.recentErrors||[]},14000),target);return send(res,200,{plan,model})}
+      const result=await requestModel('Chấm homework tiếng Anh cho người Việt theo câu hỏi, tài liệu, đáp án/mẫu và bài làm được cung cấp. Không coi mẫu là đáp án duy nhất. Chỉ nhận xét phần đã nộp. Không chấm phát âm từ văn bản. Trả JSON {summary:string,score:0-100,corrections:[string],strengths:[string],nextSteps:[string]}. Điểm nội bộ không phải band IELTS.',{skill:body.skill,plan:body.plan,answers:body.answers},3000);return send(res,200,{result,model});
+    }catch(error){return send(res,502,{error:error.message||'Chưa tạo được bài cá nhân hóa.'})}
+  }
   if(req.method==='POST'&&['/api/push/subscribe','/api/push/unsubscribe','/api/push/test'].includes(url.pathname)){
     if(!pushReady())return send(res,503,{error:'Chưa cấu hình VAPID trên Vercel.'});
     try{const body=await readJson(req);if(url.pathname.endsWith('/unsubscribe'))await unsubscribePush(body,user?.id);else if(url.pathname.endsWith('/test'))await testPush(body,user?.id);else await subscribePush(body,user?.id);return send(res,200,{ok:true})}catch{return send(res,400,{error:'Không xử lý được thông báo. Kiểm tra kết nối Supabase, cấu hình VAPID và quyền thông báo.'})}

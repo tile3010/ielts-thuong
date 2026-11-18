@@ -6,7 +6,8 @@ window.extendLesson=function({skill,warm,strategy,practice,review,reflection,mai
  const note=(id,label,placeholder='Write your answer in English…')=>'<label style="display:block;margin:12px 0"><b>'+label+'</b><textarea class="field" data-depth="'+id+'" placeholder="'+escape(placeholder)+'"></textarea></label>';
  const add=(target,title,html)=>{const box=document.createElement('div');box.className='activity depth-work';box.innerHTML='<h3>'+title+'</h3>'+html;target.append(box);return box};
  const drill=add(strategy,'Thực hành chiến lược — không chỉ đọc hướng dẫn','');
- if(skill==='listening'){
+ if(window.currentAdaptiveEntry){window.CurriculumUI.buildClass({warm,strategy,practice,review,reflection},window.currentAdaptiveEntry,window.currentAdaptiveSave);}
+ else if(skill==='listening'){
   add(warm,'Ôn chủ động trong 5 phút','<p>2 phút nghe/nhắc lại 4 từ phía trên; 2 phút làm nghe khởi động; 1 phút che danh sách và viết lại 4 từ theo trí nhớ.</p>'+note('warm-recall','Viết 4 từ vừa nghe'));
   drill.innerHTML='<h3>Chiến lược — 10 phút thực hành</h3><p><b>3 phút:</b> xác định loại thông tin cần nghe cho 8 chỗ trống. <b>4 phút:</b> nối 4 cặp paraphrase. <b>3 phút:</b> đoán cách ghi và đọc to từng câu hỏi. Chỉ xem đáp án ở bước 4.</p>'+note('prediction','Ghi number / day / person / place / item / duration / price / transport cho mỗi câu','1. Contact person: ___\n2. Class begins on: ___\n3. Room: ___\n4. Bring your: ___\n5. The course lasts: ___\n6. It costs: ___\n7. Travel by: ___\n8. Telephone: ___')+note('matching','Nối 1–4 với A–D','1. available  2. finish  3. cost  4. begin\nA. start  B. be free  C. end  D. price');
   const clips=[
@@ -57,6 +58,6 @@ window.extendLesson=function({skill,warm,strategy,practice,review,reflection,mai
  const update=()=>{display.textContent='Phần '+(stage+1)+': '+format(elapsed[stage])+' / '+format(limits[stage])+' · Tổng: '+format(elapsed.reduce((a,b)=>a+b,0))+' / 60:00'};
  toggle.onclick=()=>{running=!running;last=Date.now();toggle.textContent=running?'Tạm dừng':'Tiếp tục tính giờ'};
  const interval=setInterval(()=>{if(!clock.isConnected){clearInterval(interval);return}const now=Date.now();if(running&&!document.hidden)elapsed[stage]+=Math.min((now-last)/1000,1.5);last=now;saved.elapsed=elapsed;persist();update()},1000);
- window.lessonWork=()=>({...saved,elapsed:[...elapsed]});
+ window.lessonWork=()=>({...saved,elapsed:[...elapsed],...(window.currentAdaptiveEntry?{adaptivePlan:{topic:window.currentAdaptiveEntry.plan.topic,target:window.currentAdaptiveEntry.plan.target,main:window.currentAdaptiveEntry.plan.main,materials:window.currentAdaptiveEntry.plan.materials.filter(m=>m.section==='main')},answers:window.currentAdaptiveEntry.answers.main}:{})});
  return {setStage(value){stage=value;last=Date.now();update()},totalSeconds:()=>elapsed.reduce((a,b)=>a+b,0)};
 };
