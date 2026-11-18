@@ -146,6 +146,7 @@ export async function handler(req, res) {
       if(user&&!await reserveAi(user))return send(res,429,{error:'Đã hết lượt AI hôm nay.'});
       const body=await readJson(req);if(!['listening','reading','writing','speaking'].includes(body.skill))return send(res,400,{error:'Kỹ năng không hợp lệ.'});
       if(url.pathname==='/api/curriculum'){const target=learningTarget(body.monthlyTests,body.skill);const plan=validatePlan(await requestModel(curriculumPrompt,{skill:body.skill,target,topic:body.topic||'Learning and work',recentErrors:body.recentErrors||[]},14000),target);return send(res,200,{plan,model})}
+      if(!Array.isArray(body.plan?.homework)||!body.plan.homework.length||body.plan.homework.some(task=>typeof body.answers?.[task.id]!=='string'||!body.answers[task.id].trim()))return send(res,400,{error:'Hoàn thành tất cả nhiệm vụ homework trước khi nộp.'});
       const result=await requestModel('Chấm homework tiếng Anh cho người Việt theo câu hỏi, tài liệu, đáp án/mẫu và bài làm được cung cấp. Không coi mẫu là đáp án duy nhất. Chỉ nhận xét phần đã nộp. Không chấm phát âm từ văn bản. Trả JSON {summary:string,score:0-100,corrections:[string],strengths:[string],nextSteps:[string]}. Điểm nội bộ không phải band IELTS.',{skill:body.skill,plan:body.plan,answers:body.answers},3000);return send(res,200,{result,model});
     }catch(error){return send(res,502,{error:error.message||'Chưa tạo được bài cá nhân hóa.'})}
   }
