@@ -184,9 +184,11 @@
     review.innerHTML='<h3>4 · Đáp án & sửa lỗi — 10 phút</h3><p>'+content[2]+'</p>';
     const originalPracticeHeading=practice.querySelector('h3');if(originalPracticeHeading)originalPracticeHeading.textContent='3 · Bài luyện chính — 25 phút';
     const reflectionHeading=reflection.querySelector('h3');if(reflectionHeading)reflectionHeading.textContent='5 · Tự đánh giá — 10 phút';
+    const depth=window.extendLesson?.({skill:activeSkill.id,warm,strategy,practice,review,reflection,main,storageKey:key,date:today});
     const back=document.createElement('button'),next=document.createElement('button');back.className='btn btn-line';next.className='btn btn-green';back.textContent='Quay lại';next.textContent='Tiếp theo';actions.prepend(back);actions.append(next);
     const steps=[...app.querySelectorAll('.lesson-step')];let current=0;
     const update=()=>{
+      depth?.setStage(current);
       warm.hidden=current!==0;strategy.hidden=current!==1;practice.hidden=current!==2&&current!==3;review.hidden=current!==3;reflection.hidden=current!==4;
       finish.hidden=current!==4;back.hidden=current===0;next.hidden=current===4;
       steps.forEach((el,i)=>{el.classList.toggle('active',i===current);el.setAttribute('aria-current',i===current?'step':'false')});
@@ -198,7 +200,7 @@
     back.onclick=()=>go(current-1);next.onclick=()=>go(current+1);
     steps.forEach((el,i)=>{el.style.cursor='pointer';el.tabIndex=0;el.setAttribute('role','button');el.onclick=()=>{if(i<=current)go(i)};el.onkeydown=e=>{if(e.key==='Enter'&&i<=current)go(i)}});
     finish.removeAttribute('onclick');
-    finish.onclick=()=>{if(current!==4){showToast('Hoàn thành các bước trước khi lưu buổi học.');return}return window.finishSession()};
+    finish.onclick=()=>{if(current!==4){showToast('Hoàn thành các bước trước khi lưu buổi học.');return}if(depth&&depth.totalSeconds()<3600&&!confirm('Bạn mới ghi nhận '+Math.floor(depth.totalSeconds()/60)+' phút học, chưa đủ 60 phút. Vẫn lưu kết quả hiện tại?'))return;return window.finishSession()};
     const transcript=practice.querySelector('#transcript');
     if(transcript){const reveal=document.createElement('details');reveal.innerHTML='<summary>Transcript — xem cuối buổi học</summary>';transcript.classList.add('show');reveal.append(transcript);reflection.append(reveal);practice.querySelector('button[onclick*="showTranscript"]')?.remove();}
     update();
@@ -220,6 +222,7 @@
   const stepBindPage=bindPage;
   bindPage=function(){stepBindPage();refreshListening()};
   assessSession=async function(session){
+    session.extendedWork=window.lessonWork?.()||{};session.studySeconds=(session.extendedWork.elapsed||[]).reduce((a,b)=>a+b,0);
     const main=app.querySelector('.lesson-main');
     const context={skill:session.skill,material:main?.innerText.slice(0,16000)||'',questions:[...app.querySelectorAll('.question[data-q]')].map(q=>({id:q.dataset.q,question:q.querySelector('strong')?.textContent,answer:q.querySelector('.option')?.dataset.correct})),transcript:document.getElementById('transcript')?.textContent||''};
     try{const response=await postAI('/api/assessment',{skill:session.skill,currentLevel:data.currentBand,targetBand:data.targetBand,session,recentSessions:data.sessions.slice(-12),lessonContext:context});const report={...response.result,date:session.date,skill:session.skill,model:response.model,transcript:context.transcript};session.aiReport=report;data.aiReports.push(report);save()}catch(error){data.aiError=error.message;save();showToast('Đã lưu bài; chưa nhận được tổng kết AI: '+error.message)}
