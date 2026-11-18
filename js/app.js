@@ -1,15 +1,34 @@
-(()=>{
+(async()=>{
   const SKILLS=[
     {id:'listening',name:'Listening',vi:'Nghe hiểu',icon:'🎧',accent:'#dff1e9',blurb:'Nghe ý chính, nhận diện từ khóa và con số.'},
     {id:'reading',name:'Reading',vi:'Đọc hiểu',icon:'📖',accent:'#e4eef8',blurb:'Đọc nhanh, tìm thông tin và hiểu câu hỏi.'},
     {id:'writing',name:'Writing',vi:'Viết',icon:'✍️',accent:'#fbeddc',blurb:'Viết câu rõ ràng, nối ý và giảm lỗi ngữ pháp.'},
     {id:'speaking',name:'Speaking',vi:'Nói',icon:'🗣️',accent:'#f2e8f4',blurb:'Nói tự tin bằng câu đơn giản, đủ ý.'}
   ];
-  const START='2026-11-17';
   const key='thuong-ielts-study-v1'+(window.LEARNER?'-'+window.LEARNER.id:'');
   const defaults={name:'Thương',currentBand:'3.5',targetBand:'5.5',minutes:60,sessions:[],drafts:{},checks:{}};
   if(window.LEARNER)defaults.name=window.LEARNER.name;
+  const resetVersion='owner-fresh-start-2026-11-18-v1';
+  if(window.LEARNER?.owner){
+    const local=JSON.parse(localStorage.getItem(key)||'{}');
+    if(local.resetVersion!==resetVersion){
+      try{
+        const response=await fetch('/api/progress');const result=await response.json();if(!response.ok)throw Error(result.error||'Không đọc được cloud để reset.');
+        let state=result.record?.state;
+        if(state?.resetVersion!==resetVersion){
+          const previous={...defaults,...local,...state};
+          state={name:previous.name,currentBand:previous.currentBand,targetBand:previous.targetBand,minutes:60,sessions:[],drafts:{},checks:{},aiReports:[],monthlyTests:{},adaptivePlans:{},resetVersion,studyStartDate:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())};
+          const saved=await fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state,revision:result.record?.revision||0})});const payload=await saved.json();if(!saved.ok)throw Error(payload.error||'Chưa reset được cloud.');
+          localStorage.setItem(key+'-cloud-revision',String(payload.revision));
+        }else localStorage.setItem(key+'-cloud-revision',String(result.record.revision));
+        localStorage.setItem(key+'-before-fresh-start',JSON.stringify(local));
+        for(const item of Object.keys(localStorage))if(item.startsWith(key+'-work-'))localStorage.removeItem(item);
+        localStorage.setItem(key,JSON.stringify(state));
+      }catch(error){alert('Chưa reset tiến độ: '+error.message+' Tải lại trang để thử lại.');}
+    }
+  }
   let data={...defaults,...JSON.parse(localStorage.getItem(key)||'{}')};
+  const START=data.studyStartDate||'2026-11-17';
   data.aiReports=Array.isArray(data.aiReports)?data.aiReports:[];
   data.monthlyTests=data.monthlyTests||{};
   let page='home',toastTimer;
@@ -85,6 +104,7 @@
       const chosen=candidates[0]||SKILLS.map((s,i)=>({id:s.id,index:i,weight:weights[s.id],left:left[i]})).filter(x=>x.left>0).sort((a,b)=>b.weight-a.weight)[0];
       if(!chosen)break;plan.push(chosen.id);left[chosen.index]--;
     }
+    if(data.studyStartDate){const first=plan.indexOf('listening');if(first>0)return [...plan.slice(first),...plan.slice(0,first)];}
     return plan;
   }
 
