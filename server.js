@@ -24,7 +24,20 @@ loadEnv();
 const port = Number(process.env.PORT || 3000);
 const model = process.env.OPENAI_MODEL || 'gpt-6-luna';
 
+function openAiKey() {
+  const key=(process.env.OPENAI_API_KEY||'').trim();
+  if(!/^sk-[A-Za-z0-9_-]+$/.test(key))throw Object.assign(new Error('OPENAI_API_KEY sai định dạng. Trong Vercel, giá trị biến này chỉ chứa khóa API trên một dòng; đặt OPENAI_MODEL thành biến riêng rồi Redeploy.'),{status:503});
+  return key;
+}
+function safeApiError(message) {
+  let value=String(message||'Không thể hoàn tất yêu cầu.');
+  const configured=process.env.OPENAI_API_KEY;
+  if(configured)value=value.split(configured).join('[API key đã ẩn]');
+  return value.replace(/sk-[A-Za-z0-9_-]+/g,'[API key đã ẩn]');
+}
+
 function send(res, status, body, type = 'application/json; charset=utf-8') {
+  if(status>=400&&body&&typeof body==='object'&&body.error)body={...body,error:safeApiError(body.error)};
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
 }
@@ -44,7 +57,7 @@ const text = (value, max = 4000) => typeof value === 'string' ? value.trim().sli
 const list = (value, max = 30) => Array.isArray(value) ? value.slice(-max) : [];
 
 async function requestModel(instructions, payload, maxOutputTokens = 1400) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = openAiKey();
   if (!apiKey || apiKey === 'your_api_key_here') {
     throw Object.assign(new Error('Chưa cấu hình API key. Hãy sao chép .env.example thành .env và thêm OPENAI_API_KEY.'), { status: 503 });
   }
@@ -184,7 +197,7 @@ export async function handler(req, res) {
       const mime=(req.headers['content-type']||'audio/webm').split(';')[0];
       const extension=mime.includes('mp4')?'mp4':mime.includes('ogg')?'ogg':'webm';
       const form=new FormData();form.append('model',process.env.OPENAI_TRANSCRIBE_MODEL||'gpt-transcribe');form.append('language','en');form.append('file',new Blob(chunks,{type:mime}),`speaking.${extension}`);
-      const response=await fetch('https://api.openai.com/v1/audio/transcriptions',{method:'POST',headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},body:form});
+      const response=await fetch('https://api.openai.com/v1/audio/transcriptions',{method:'POST',headers:{Authorization:`Bearer ${openAiKey()}`},body:form});
       const transcription=await response.json();
       if(!response.ok)throw new Error(transcription.error?.message||'Không chuyển được bản thu thành chữ.');
       const transcript=transcription.text||'';
